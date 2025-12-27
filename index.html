@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Ben's Wallet</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- React and Libraries -->
+  <script type="importmap">
+  {
+    "imports": {
+      "react": "https://esm.sh/react@19.0.0",
+      "react-dom/client": "https://esm.sh/react-dom@19.0.0/client",
+      "recharts": "https://esm.sh/recharts@2.12.7"
+    }
+  }
+  </script>
+  <!-- Babel for JSX Transpilation in Browser -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: #09090b;
+      color: #fafafa;
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+    }
+    .no-scrollbar::-webkit-scrollbar { display: none; }
+    .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    
+    @keyframes slideIn {
+      from { transform: translateY(20px); opacity: 0; }
+      to { transform: translateY(0); opacity: 1; }
+    }
+    .animate-in { animation: slideIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+    
+    .view-transition {
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    
+    input[type="date"]::-webkit-calendar-picker-indicator {
+      filter: invert(1);
+    }
+  </style>
+</head>
+<body class="bg-zinc-950 text-zinc-50 overflow-x-hidden">
+  <div id="root"></div>
+
+  <script type="text/babel" data-type="module">
+    import React, { useState, useMemo, useEffect } from 'react';
+    import { createRoot } from 'react-dom/client';
+    import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
+
+    // --- Constants & Helpers ---
+    const CATEGORIES = ['Food', 'Transport', 'Shopping', 'Bills', 'Entertainment', 'Junk Food'];
+    const CATEGORY_COLORS = {
+      Food: '#f87171',
+      Transport: '#60a5fa',
+      Shopping: '#fbbf24',
+      Bills: '#34d399',
+      Entertainment: '#a78bfa',
+      'Junk Food': '#94a3b8'
+    };
+    const CATEGORY_EMOJIS = {
+      Food: '🍔',
+      Transport: '🚗',
+      Shopping: '🛍️',
+      Bills: '📑',
+      Entertainment: '🎬',
+      'Junk Food': '🍕'
+    };
+
+    const formatCurrency = (amount) => new Intl.NumberFormat('en-US', {
+      style: 'currency', currency: 'USD'
+    }).format(amount);
+
+    const getMonthKey = (dateStr) => dateStr.substring(0, 7);
+    const getMonthYearString = (dateStr) => {
+      const date = new Date(dateStr + 'T00:00:00');
+      return date.toLocaleString('default', { month: 'long', year: 'numeric' });
+    };
+
+    const STORAGE_KEY = 'fintrack_data_v2';
+    const storage = {
+      get: () => JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'),
+      save: (data) => localStorage.setItem(STORAGE_KEY, JSON.stringify(data)),
+      add: (tx) => {
+        const data = [...storage.get(), tx];
+        storage.save(data);
+        return data;
+      },
+      remove: (id) => {
+        const data = storage.get().filter(t => t.id !== id);
+        storage.save(data);
+        return data;
+      }
+    };
+
+    // --- Components ---
+    const DonutChart = ({ transactions }) => {
+      const chartData = useMemo(() => {
+        const dataMap = transactions.reduce((acc, tx) => {
+          acc[tx.category] = (acc[tx.category] || 0) + tx.amount;
+          return acc;
+        }, {});
+        return Object.entries(dataMap).map(([name, value]) => ({ name, value }));
+      }, [transactions]);
+
+      if (chartData.length === 0) return (
+        <div className="h-48 flex items-center justify-center text-zinc-600 text-sm font-medium">
+          No data this month
+        </div>
+      );
+
+      return (
+        <div className="h-64 w-full">
+          <ResponsiveContainer width="100%" height="100%">
+            <PieChart>
+              <Pie
+                data={chartData}
+                cx="50%" cy="50%"
+                innerRadius={60} outerRadius={80}
+                paddingAngle={5} dataKey="value"
+                stroke="none"
+              >
+                {chartData.map((entry) => (
+                  <Cell key={entry.name} fill={CATEGORY_COLORS[entry.name]} />
+                ))}
+              </Pie>
+              <Tooltip 
+                contentStyle={{ backgroundColor: '#18181b', border: 'none', borderRadius: '12px' }}
+                itemStyle={{ color: '#fff', fontSize: '12px' }}
+              />
+            </PieChart>
+          </ResponsiveContainer>
+        </div>
+      );
+    };
+
+    const AddTransactionModal = ({ onClose, onAdd }) => {
+      const [amount, setAmount] = useState('');
+      const [category, setCategory] = useState('Food');
+      const [desc, setDesc] = useState('');
+      const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+
+      return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+          <div className="w-full max-w-sm bg-zinc-900 rounded-[2.5rem] p-8 border border-zinc-800 shadow-2xl animate-in">
+            <h2 className="text-xl font-bold mb-6">New Spend</h2>
+            <div className="space-y-5">
+              <input
+                type="number" placeholder="0.00" value={amount}
+                onChange={e => setAmount(e.target.value)}
+                className="w-full bg-zinc-800 border-none rounded-2xl px-5 py-4 text-2xl font-bold focus:ring-2 focus:ring-indigo-500 outline-none"
+              />
+              <div className="grid grid-cols-3 gap-2">
+                {CATEGORIES.map(cat => (
+                  <button
+                    key={cat} onClick={() => setCategory(cat)}
+                    className={`py-2 px-1 rounded-xl text-[10px] font-bold uppercase tracking-wider transition-all ${
+                      category === cat ? 'bg-indigo-600 text-white' : 'bg-zinc-800 text-zinc-500'
+                    }`}
+                  >
+                    {cat}
+                  </button>
+                ))}
+              </div>
+              <input
+                type="text" placeholder="What for?" value={desc}
+                onChange={e => setDesc(e.target.value)}
+                className="w-full bg-zinc-800 border-none rounded-2xl px-5 py-4 focus:ring-2 focus:ring-indigo-500 outline-none"
+              />
+              <input
+                type="date" value={date}
+                onChange={e => setDate(e.target.value)}
+                className="w-full bg-zinc-800 border-none rounded-2xl px-5 py-4 focus:ring-2 focus:ring-indigo-500 outline-none"
+              />
+              <div className="flex gap-3 pt-2">
+                <button onClick={onClose} className="flex-1 py-4 text-zinc-400 font-bold hover:text-white transition-colors">Cancel</button>
+                <button 
+                  onClick={() => {
+                    if(!amount) return;
+                    onAdd({ id: Date.now().toString(), amount: Number(amount), category, description: desc || category, date });
+                    onClose();
+                  }}
+                  className="flex-[2] bg-white text-black font-bold py-4 rounded-2xl hover:bg-zinc-200"
+                >
+                  Save
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    const HistoryView = ({ transactions, onBack, onDelete }) => {
+      const [expanded, setExpanded] = useState(null);
+      const months = useMemo(() => {
+        const groups = transactions.reduce((acc, tx) => {
+          const key = getMonthKey(tx.date);
+          if (!acc[key]) acc[key] = { key, name: getMonthYearString(tx.date), total: 0, txs: [] };
+          acc[key].total += tx.amount;
+          acc[key].txs.push(tx);
+          return acc;
+        }, {});
+        return Object.values(groups).sort((a, b) => b.key.localeCompare(a.key));
+      }, [transactions]);
+
+      return (
+        <div className="min-h-screen bg-zinc-950 px-5 pt-16 pb-32 animate-in">
+          <div className="flex items-center mb-10">
+            <button onClick={onBack} className="p-3 bg-zinc-900 rounded-2xl border border-zinc-800 mr-4">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7"/></svg>
+            </button>
+            <h1 className="text-3xl font-bold">History</h1>
+          </div>
+          <div className="space-y-4">
+            {months.length === 0 ? (
+              <p className="text-center text-zinc-600 py-10">No history found</p>
+            ) : (
+              months.map(m => (
+                <div key={m.key} className="bg-zinc-900/40 rounded-[2rem] border border-zinc-900 overflow-hidden">
+                  <button 
+                    onClick={() => setExpanded(expanded === m.key ? null : m.key)}
+                    className="w-full flex justify-between items-center p-6 text-left"
+                  >
+                    <div>
+                      <p className="text-sm font-semibold text-zinc-500 uppercase tracking-tighter">{m.name}</p>
+                      <p className="text-2xl font-bold">{formatCurrency(m.total)}</p>
+                    </div>
+                    <div className={`transition-transform ${expanded === m.key ? 'rotate-180' : ''}`}>
+                      <svg className="w-5 h-5 text-zinc-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"/></svg>
+                    </div>
+                  </button>
+                  {expanded === m.key && (
+                    <div className="px-6 pb-6 pt-2 border-t border-zinc-800/50 space-y-4">
+                      {m.txs.sort((a,b) => b.date.localeCompare(a.date)).map(tx => (
+                        <div key={tx.id} className="flex justify-between items-center">
+                          <div className="flex items-center gap-4">
+                            <span className="text-xl">{CATEGORY_EMOJIS[tx.category]}</span>
+                            <div>
+                              <p className="text-sm font-bold">{tx.description}</p>
+                              <p className="text-[10px] text-zinc-500">{tx.date}</p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <p className="font-bold">{formatCurrency(tx.amount)}</p>
+                            <button onClick={() => onDelete(tx.id)} className="text-red-500/50 hover:text-red-500">
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      );
+    };
+
+    const App = () => {
+      const [view, setView] = useState('dashboard');
+      const [txs, setTxs] = useState([]);
+      const [showAdd, setShowAdd] = useState(false);
+
+      useEffect(() => { setTxs(storage.get()); }, []);
+
+      const currentMonthKey = getMonthKey(new Date().toISOString());
+      const monthTxs = txs.filter(t => getMonthKey(t.date) === currentMonthKey);
+      const monthTotal = monthTxs.reduce((s, t) => s + t.amount, 0);
+      const recent = [...txs].sort((a,b) => b.date.localeCompare(a.date)).slice(0, 5);
+
+      const handleDelete = (id) => {
+        if (window.confirm("Delete this transaction?")) {
+          setTxs(storage.remove(id));
+        }
+      };
+
+      if (view === 'history') {
+        return <HistoryView transactions={txs} onBack={() => setView('dashboard')} onDelete={handleDelete} />;
+      }
+
+      return (
+        <div className="max-w-md mx-auto px-5 pt-16 pb-32 animate-in">
+          <header className="flex justify-between items-center mb-10">
+            <div>
+              <p className="text-zinc-500 font-medium text-sm">Save up!</p>
+              <h1 className="text-3xl font-extrabold tracking-tight">Ben's Wallet</h1>
+            </div>
+            <div className="w-12 h-12 rounded-full bg-gradient-to-tr from-indigo-500 to-purple-500 p-0.5">
+              <div className="w-full h-full rounded-full bg-zinc-950 flex items-center justify-center font-bold text-lg">B</div>
+            </div>
+          </header>
+
+          <div 
+            onClick={() => setView('history')}
+            className="group relative overflow-hidden bg-gradient-to-br from-indigo-600 to-indigo-800 rounded-[2.5rem] p-10 mb-8 cursor-pointer active:scale-95 transition-all shadow-2xl shadow-indigo-900/30"
+          >
+            <div className="absolute top-0 right-0 -m-10 w-48 h-48 bg-white/10 rounded-full blur-3xl"></div>
+            <p className="text-indigo-100/60 font-bold text-xs uppercase tracking-widest mb-2">Month Total</p>
+            <h2 className="text-5xl font-extrabold text-white tracking-tighter mb-6">{formatCurrency(monthTotal)}</h2>
+            <div className="flex items-center text-indigo-100 text-xs font-bold uppercase tracking-widest gap-2">
+              See History <svg className="w-4 h-4 transition-transform group-hover:translate-x-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 7l5 5m0 0l-5 5m5-5H6"/></svg>
+            </div>
+          </div>
+
+          <div className="bg-zinc-900/30 border border-zinc-900 rounded-[2.5rem] p-6 mb-10">
+            <h3 className="text-sm font-bold text-zinc-500 uppercase tracking-widest mb-2 text-center">Category Split</h3>
+            <DonutChart transactions={monthTxs} />
+          </div>
+
+          <div className="flex justify-between items-end mb-6">
+            <h3 className="text-xl font-extrabold">Recent Activities</h3>
+            <button onClick={() => setView('history')} className="text-zinc-500 text-sm font-bold">View all</button>
+          </div>
+          <div className="space-y-4">
+            {recent.length === 0 ? (
+               <p className="text-center text-zinc-600 py-10">No recent activity</p>
+            ) : (
+              recent.map(t => (
+                <div key={t.id} className="flex items-center justify-between p-5 bg-zinc-900/20 rounded-3xl border border-zinc-900/50">
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 bg-zinc-900 rounded-2xl flex items-center justify-center text-xl">
+                      {CATEGORY_EMOJIS[t.category]}
+                    </div>
+                    <div>
+                      <p className="font-bold text-zinc-100">{t.description}</p>
+                      <p className="text-[10px] text-zinc-500 font-bold uppercase">{t.category} • {t.date}</p>
+                    </div>
+                  </div>
+                  <p className="font-extrabold text-lg">{formatCurrency(t.amount)}</p>
+                </div>
+              ))
+            )}
+          </div>
+
+          <button 
+            onClick={() => setShowAdd(true)}
+            className="fixed bottom-10 left-1/2 -translate-x-1/2 w-16 h-16 bg-white text-black rounded-full shadow-2xl flex items-center justify-center active:scale-90 transition-transform hover:scale-110 z-40"
+          >
+            <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4"/></svg>
+          </button>
+
+          {showAdd && <AddTransactionModal onClose={() => setShowAdd(false)} onAdd={tx => setTxs(storage.add(tx))} />}
+        </div>
+      );
+    };
+
+    const container = document.getElementById('root');
+    const root = createRoot(container);
+    root.render(<App />);
+  </script>
+</body>
+</html>
