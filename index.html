@@ -37,7 +37,6 @@
     }
     .animate-in { animation: slideIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
     
-    /* Standardized input appearance across mobile OS */
     input[type="date"] {
       appearance: none;
       -webkit-appearance: none;
@@ -67,6 +66,10 @@
     import React, { useState, useMemo, useEffect } from 'react';
     import { createRoot } from 'react-dom/client';
     import { PieChart, Pie, Cell, Tooltip } from 'recharts';
+
+    // --- ⬇️ YOUR URL IS NOW CONFIGURED BELOW ⬇️ ---
+    const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxvwTmZt00kS-GvF8C90m8oD5ofpkda2XxOcITlfStUsMcFyckED2ytcbzykjevEJDNOw/exec"; 
+    // ---------------------------------------------------------------
 
     // --- Constants & Helpers ---
     const CATEGORIES = ['Food', 'Transport', 'Shopping', 'Bills', 'Entertainment', 'Junk Food'];
@@ -215,6 +218,7 @@
       const [category, setCategory] = useState('Food');
       const [desc, setDesc] = useState('');
       const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+      const [isSaving, setIsSaving] = useState(false);
 
       const handleSave = (e) => {
         e.preventDefault();
@@ -226,6 +230,8 @@
           return;
         }
 
+        setIsSaving(true);
+
         const newTx = { 
           id: Date.now().toString(), 
           amount: numAmount, 
@@ -234,8 +240,14 @@
           date: date || new Date().toISOString().split('T')[0]
         };
 
+        // Pass to parent
         onAdd(newTx);
-        onClose();
+        
+        // Short delay for UX before closing
+        setTimeout(() => {
+            setIsSaving(false);
+            onClose();
+        }, 50);
       };
 
       return (
@@ -295,9 +307,10 @@
                 </button>
                 <button 
                   type="submit"
-                  className="flex-[2] bg-white text-black font-bold py-4 rounded-2xl hover:bg-zinc-200 active:scale-95 transition-transform"
+                  disabled={isSaving}
+                  className="flex-[2] bg-white text-black font-bold py-4 rounded-2xl hover:bg-zinc-200 active:scale-95 transition-transform disabled:opacity-50"
                 >
-                  Save
+                  {isSaving ? 'Saving...' : 'Save'}
                 </button>
               </div>
             </form>
@@ -398,12 +411,33 @@
       const recent = useMemo(() => [...txs].sort((a,b) => (b.date || '').localeCompare(a.date || '')).slice(0, 5), [txs]);
 
       const handleAddTx = (newTx) => {
+        // 1. Save locally (Instant UI Update)
         const updated = storage.add(newTx);
         setTxs(updated);
+
+        // 2. Send to Google Sheets (Background Sync)
+        if (GOOGLE_SCRIPT_URL) {
+          console.log("Syncing to sheet...");
+          
+          fetch(GOOGLE_SCRIPT_URL, {
+            method: "POST",
+            mode: "no-cors",
+            headers: {
+                "Content-Type": "text/plain"
+            },
+            body: JSON.stringify({
+              amount: newTx.amount,
+              category: newTx.category,
+              note: newTx.description
+            })
+          })
+          .then(() => console.log("Success: Sent to Sheet"))
+          .catch(err => console.error("Error sending to sheet", err));
+        }
       };
 
       const handleDelete = (id) => {
-        if (window.confirm("Delete this transaction?")) {
+        if (window.confirm("Delete this transaction? (Local only)")) {
           const updated = storage.remove(id);
           setTxs(updated);
         }
