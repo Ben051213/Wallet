@@ -37,13 +37,26 @@
     }
     .animate-in { animation: slideIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
     
+    /* Standardized input appearance across mobile OS */
+    input[type="date"] {
+      appearance: none;
+      -webkit-appearance: none;
+      min-height: 3.5rem;
+      background-color: #27272a;
+      font-size: 1rem;
+    }
     input[type="date"]::-webkit-calendar-picker-indicator {
       filter: invert(1);
+      cursor: pointer;
     }
     
     .apple-card-active:active {
       transform: scale(0.97);
       transition: transform 0.1s ease;
+    }
+
+    .recharts-tooltip-wrapper {
+      outline: none !important;
     }
   </style>
 </head>
@@ -53,7 +66,7 @@
   <script type="text/babel" data-type="module">
     import React, { useState, useMemo, useEffect } from 'react';
     import { createRoot } from 'react-dom/client';
-    import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
+    import { PieChart, Pie, Cell, Tooltip } from 'recharts';
 
     // --- Constants & Helpers ---
     const CATEGORIES = ['Food', 'Transport', 'Shopping', 'Bills', 'Entertainment', 'Junk Food'];
@@ -78,15 +91,19 @@
       style: 'currency', currency: 'USD'
     }).format(amount || 0);
 
-    const getMonthKey = (dateStr) => {
-      if (!dateStr || typeof dateStr !== 'string') return '9999-12';
+    const getLocalMonthKey = (dateStr) => {
+      if (!dateStr) {
+        const d = new Date();
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      }
       return dateStr.substring(0, 7);
     };
 
     const getMonthYearString = (dateStr) => {
       if (!dateStr) return 'Unknown Date';
       try {
-        const date = new Date(dateStr + 'T00:00:00');
+        const [y, m, d] = dateStr.split('-');
+        const date = new Date(parseInt(y), parseInt(m) - 1, parseInt(d) || 1);
         return date.toLocaleString('default', { month: 'long', year: 'numeric' });
       } catch (e) {
         return 'Invalid Date';
@@ -124,33 +141,47 @@
       }
     };
 
-    const DonutChart = ({ transactions }) => {
+    const DonutChart = ({ transactions, total }) => {
       const chartData = useMemo(() => {
         const dataMap = transactions.reduce((acc, tx) => {
           const cat = tx.category || 'Other';
           acc[cat] = (acc[cat] || 0) + (tx.amount || 0);
           return acc;
         }, {});
-        return Object.entries(dataMap).map(([name, value]) => ({ name, value }));
-      }, [transactions]);
+        return Object.entries(dataMap)
+          .map(([name, value]) => ({ 
+            name, 
+            value,
+            percentage: total > 0 ? ((value / total) * 100).toFixed(0) : 0
+          }))
+          .filter(item => item.value > 0)
+          .sort((a, b) => b.value - a.value);
+      }, [transactions, total]);
 
       if (chartData.length === 0) return (
         <div className="h-48 flex flex-col items-center justify-center text-zinc-600 space-y-2">
-          <p className="text-sm font-medium">No spending recorded yet</p>
-          <p className="text-xs">Add your first transaction below</p>
+          <p className="text-sm font-medium">No spending this month</p>
+          <p className="text-[10px] uppercase tracking-widest opacity-40">Chart will appear once you add spend</p>
         </div>
       );
 
       return (
-        <div className="h-64 w-full">
-          <ResponsiveContainer width="100%" height="100%">
-            <PieChart>
+        <div className="w-full flex flex-col items-center">
+          <div className="relative w-[250px] h-[250px] flex justify-center items-center">
+            <div className="absolute flex flex-col items-center justify-center pointer-events-none">
+              <span className="text-[10px] uppercase font-bold text-zinc-500 tracking-tighter">Spent</span>
+              <span className="text-lg font-bold text-zinc-100">{formatCurrency(total)}</span>
+            </div>
+            <PieChart width={250} height={250}>
               <Pie
                 data={chartData}
                 cx="50%" cy="50%"
-                innerRadius={60} outerRadius={80}
-                paddingAngle={5} dataKey="value"
+                innerRadius={75}
+                outerRadius={95}
+                paddingAngle={4}
+                dataKey="value"
                 stroke="none"
+                isAnimationActive={false}
               >
                 {chartData.map((entry) => (
                   <Cell key={entry.name} fill={CATEGORY_COLORS[entry.name] || '#52525b'} />
@@ -158,10 +189,23 @@
               </Pie>
               <Tooltip 
                 contentStyle={{ backgroundColor: '#18181b', border: 'none', borderRadius: '12px' }}
-                itemStyle={{ color: '#fff', fontSize: '12px' }}
+                itemStyle={{ color: '#fff', fontSize: '11px', fontWeight: 'bold' }}
+                cursor={{ fill: 'transparent' }}
               />
             </PieChart>
-          </ResponsiveContainer>
+          </div>
+          
+          <div className="w-full mt-4 grid grid-cols-2 gap-x-4 gap-y-2 px-2">
+            {chartData.map((entry) => (
+              <div key={entry.name} className="flex items-center justify-between bg-zinc-900/40 p-2 rounded-xl border border-zinc-800/50">
+                <div className="flex items-center gap-2 overflow-hidden">
+                  <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: CATEGORY_COLORS[entry.name] }}></div>
+                  <span className="text-[10px] font-bold text-zinc-400 truncate">{entry.name}</span>
+                </div>
+                <span className="text-[10px] font-black text-zinc-100 shrink-0">{entry.percentage}%</span>
+              </div>
+            ))}
+          </div>
         </div>
       );
     };
@@ -201,7 +245,7 @@
             onClick={e => e.stopPropagation()}
           >
             <h2 className="text-xl font-bold mb-6">New Spend</h2>
-            <form onSubmit={handleSave} className="space-y-5">
+            <form onSubmit={handleSave} className="space-y-4">
               <input
                 type="number" 
                 inputMode="decimal"
@@ -220,7 +264,7 @@
                     onClick={() => setCategory(cat)}
                     className={`py-3 px-0.5 rounded-xl text-[9px] font-bold uppercase tracking-tight transition-all border leading-tight ${
                       category === cat 
-                        ? 'bg-indigo-600 border-indigo-500 text-white' 
+                        ? 'bg-indigo-600 border-indigo-500 text-white shadow-lg shadow-indigo-500/20' 
                         : 'bg-zinc-800 border-zinc-700 text-zinc-500'
                     }`}
                   >
@@ -233,15 +277,15 @@
                 placeholder="What for? (optional)" 
                 value={desc}
                 onChange={e => setDesc(e.target.value)}
-                className="w-full bg-zinc-800 border-none rounded-2xl px-5 py-4 focus:ring-2 focus:ring-indigo-500 outline-none text-zinc-100"
+                className="w-full h-14 bg-zinc-800 border-none rounded-2xl px-5 focus:ring-2 focus:ring-indigo-500 outline-none text-zinc-100 placeholder-zinc-600"
               />
               <input
                 type="date" 
                 value={date}
                 onChange={e => setDate(e.target.value)}
-                className="w-full bg-zinc-800 border-none rounded-2xl px-5 py-4 focus:ring-2 focus:ring-indigo-500 outline-none text-zinc-100"
+                className="w-full h-14 bg-zinc-800 border-none rounded-2xl px-5 focus:ring-2 focus:ring-indigo-500 outline-none text-zinc-100"
               />
-              <div className="flex gap-3 pt-2">
+              <div className="flex gap-3 pt-4">
                 <button 
                   type="button"
                   onClick={onClose} 
@@ -267,7 +311,7 @@
       
       const months = useMemo(() => {
         const groups = transactions.reduce((acc, tx) => {
-          const key = getMonthKey(tx.date);
+          const key = getLocalMonthKey(tx.date);
           if (!acc[key]) {
             acc[key] = { key, name: getMonthYearString(tx.date), total: 0, txs: [] };
           }
@@ -310,12 +354,12 @@
                   {expanded === m.key && (
                     <div className="px-6 pb-6 pt-2 border-t border-zinc-800/30 space-y-4 animate-in">
                       {m.txs.sort((a,b) => (b.date || '').localeCompare(a.date || '')).map(tx => (
-                        <div key={tx.id} className="flex justify-between items-center group">
+                        <div key={tx.id} className="flex items-center justify-between group py-2">
                           <div className="flex items-center gap-4">
                             <span className="text-xl bg-zinc-800 w-10 h-10 flex items-center justify-center rounded-xl">{CATEGORY_EMOJIS[tx.category] || '💰'}</span>
                             <div>
                               <p className="text-sm font-bold text-zinc-200">{tx.description}</p>
-                              <p className="text-[10px] text-zinc-600 font-medium uppercase">{tx.date}</p>
+                              <p className="text-[10px] text-zinc-600 font-bold uppercase tracking-tight">{tx.date}</p>
                             </div>
                           </div>
                           <div className="flex items-center gap-3">
@@ -348,8 +392,8 @@
         setTxs(storage.get()); 
       }, []);
 
-      const currentMonthKey = getMonthKey(new Date().toISOString());
-      const monthTxs = useMemo(() => txs.filter(t => getMonthKey(t.date) === currentMonthKey), [txs, currentMonthKey]);
+      const currentMonthKey = useMemo(() => getLocalMonthKey(), []);
+      const monthTxs = useMemo(() => txs.filter(t => getLocalMonthKey(t.date) === currentMonthKey), [txs, currentMonthKey]);
       const monthTotal = useMemo(() => monthTxs.reduce((s, t) => s + (t.amount || 0), 0), [monthTxs]);
       const recent = useMemo(() => [...txs].sort((a,b) => (b.date || '').localeCompare(a.date || '')).slice(0, 5), [txs]);
 
@@ -373,7 +417,7 @@
         <div className="max-w-md mx-auto px-5 pt-16 pb-32 animate-in relative">
           <header className="flex justify-between items-center mb-10">
             <div>
-              <p className="text-zinc-600 font-bold text-[10px] uppercase tracking-widest">Save up!</p>
+              <p className="text-zinc-600 font-bold text-[10px] uppercase tracking-widest">Personal Finance</p>
               <h1 className="text-3xl font-extrabold tracking-tight">Ben's Wallet</h1>
             </div>
             <div className="w-12 h-12 rounded-full bg-gradient-to-tr from-indigo-500 to-purple-600 p-0.5 shadow-lg shadow-indigo-500/20">
@@ -398,8 +442,11 @@
           </div>
 
           <div className="bg-zinc-900/30 border border-zinc-900/50 rounded-[2.5rem] p-6 mb-10 backdrop-blur-sm">
-            <h3 className="text-[10px] font-extrabold text-zinc-600 uppercase tracking-[0.2em] mb-4 text-center">Category Breakdown</h3>
-            <DonutChart transactions={monthTxs} />
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="text-[10px] font-extrabold text-zinc-600 uppercase tracking-[0.2em]">Category Breakdown</h3>
+              <span className="text-[10px] font-bold text-zinc-700">{monthTxs.length} items</span>
+            </div>
+            <DonutChart transactions={monthTxs} total={monthTotal} />
           </div>
 
           <div className="flex justify-between items-end mb-6">
